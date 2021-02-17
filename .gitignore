@@ -1,0 +1,5 @@
+# ignore API key files
+.env
+
+# make and build files
+*.o
