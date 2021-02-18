@@ -4,6 +4,7 @@
 #include <string.h>
 #include <json-c/json.h>
 #include <time.h>
+#include <string.h>
 
 /* lets get all the data into a memory block */
 struct memory {
@@ -16,16 +17,20 @@ void json_parser_iss(const char *buffer);
 
 static size_t writecallback(char *contents, size_t size, size_t nmemb, void *userp);
 struct memory curl_request_iss(void);
-// TODO: struct memory curl_request_location(void);
+struct memory curl_request_location(void);
+const char* getApiFile(char *jsonKey);
 
 int main(void) {
-	time_t begin, end;
-	begin = time(NULL);
+	time_t begin = time(NULL);
 
 	struct memory chunk = curl_request_iss();
 	json_parser_iss(chunk.memory);
 
+	struct memory LocChunk = curl_request_location();
+	// TODO: void json_parser_location(const char *buffer);
+
 	free(chunk.memory);
+	free(LocChunk.memory);
 	printf("--finished %f s--\n", difftime(time(NULL), begin));
 	return 0;
 }
@@ -59,10 +64,6 @@ struct memory curl_request_iss(void) {
 				// printf("Found 'domain' at index %d\n", (domain - chunk.memory));
 			}
 		}
-		// printf("%s\n", chunk.memory);
-		// call json parser
-		//json_parser_iss(chunk.memory);
-		//free(chunk.memory);
 		curl_easy_cleanup(curl);
 	}
 
@@ -73,11 +74,9 @@ struct memory curl_request_iss(void) {
 struct memory curl_request_location(void) {
 
 	// load .env api key
-	char* ApiKey = getenv("MY_ENV_VAR");
-    if(!ApiKey)
-        fprintf(stderr, "API KEY not found in .env \n");
+	const char* ApiKey = getApiFile("API_KEY");
 
-	CURL *curl;
+	CURL *curl_handle;
 	CURLcode res;
 
 	struct memory LocChunk;
@@ -85,15 +84,18 @@ struct memory curl_request_location(void) {
 	LocChunk.size = 0;
 
 	curl_global_init(CURL_GLOBAL_ALL);
+	curl_handle = curl_easy_init();
 
-	curl = curl_easy_init();
+	if (curl_handle) {
+		char *placename = "Copenhaguen"; // temp hardcoded
+		char urlRequestLoc[50];
+		sprintf(urlRequestLoc, "https://api.opencagedata.com/geocode/v1/json?q=%s&key=%s", placename, ApiKey);
 
-	if (curl) {
-		curl_easy_setopt(curl, CURLOPT_URL, "https://example.com");
-		curl_easy_setopt(curl, CURLOPT_WRITEFUNCTION, writecallback);
-		curl_easy_setopt(curl, CURLOPT_WRITEDATA, &LocChunk);
+		curl_easy_setopt(curl_handle, CURLOPT_URL, urlRequestLoc);
+		curl_easy_setopt(curl_handle, CURLOPT_WRITEFUNCTION, writecallback);
+		curl_easy_setopt(curl_handle, CURLOPT_WRITEDATA, &LocChunk);
 
-		res = curl_easy_perform(curl);
+		res = curl_easy_perform(curl_handle);
 		if (res != CURLE_OK) {
 			fprintf(stderr, "curl easy perform() returned %s\n", curl_easy_strerror(res));
 		}
@@ -106,9 +108,10 @@ struct memory curl_request_location(void) {
 				// printf("Found 'domain' at index %d\n", (domain - chunk.memory));
 			}
 		}
-		curl_easy_cleanup(curl);
+		curl_easy_cleanup(curl_handle);
 	}
 	curl_global_cleanup();
+	printf("%s \n", LocChunk.memory);
 	return LocChunk;
 }
 
@@ -156,14 +159,26 @@ void json_parser_iss(const char *buffer) {
 	printf("Longitude: %lf\n", json_object_get_double(longitude));
 	printf("Altitude: %lf\n", json_object_get_double(altitude));
 	printf("Timestamp: %d\n", json_object_get_int(timestamp));
+}
 
-	/*
-	parsed_name = json_object_get_string(name);
-	parsed_id = json_object_get_int(id);
-	parsed_latitude = json_object_get_double(latitude);
-	parsed_longitude = json_object_get_double(longitude);
-	parsed_altitude = json_object_get_double(altitude);
-	parsed_timestamp = json_object_get_int(timestamp);
-	*/
 
+const char* getApiFile(char *jsonKey) {
+	FILE *fp;
+	char buffer[1024];
+	fp = fopen("env.json", "r");
+	if (!fp) {
+		printf("Error: could open env.json file.\n");
+		exit(1);
+	}
+	fread(buffer, 1024, 1, fp);
+	fclose(fp);
+
+	struct json_object *parsed_json;
+	struct json_object *ApiKey;
+
+	parsed_json = json_tokener_parse(buffer);
+	json_object_object_get_ex(parsed_json, jsonKey, &ApiKey);
+
+	const char* ApiKeyString = json_object_get_string(ApiKey);
+	return  ApiKeyString;
 }
