@@ -26,6 +26,7 @@ void ComputeRelativeAngles(float issLat, float issLon, float issAlt, // Iss coor
 float degreesToRadians(float angleDeg);
 float radiansToDegrees(float angleRad);
 float geodesicDistance(float LatA, float LonA, float LatB, float LonB);
+float chordLength(float geoDist);
 
 int main(void) {
 	time_t begin = time(NULL);
@@ -44,6 +45,7 @@ int main(void) {
 	// TODO: void json_parser_location(const char *buffer);
 	printf("Iss position: \n Lat: %f, Long: %f, Alt: %f \n", issLat, issLon, issAlt);
 	ComputeRelativeAngles(issLat, issLon, issAlt, Lat, Lon, Alt, &bearing, &elevAngle);
+
 	printf("Bearing: %f, Elevation: %f \n", bearing, elevAngle);
 
 	free(chunk.memory);
@@ -212,6 +214,13 @@ float geodesicDistance(float LatA, float LonA, float LatB, float LonB)
 	return R * acos(sin(LatA) * sin(LatB) + cos(LatA) * cos(LatB) * cos(LonA-LonB)); 
 }
 
+float chordLength(float geoDist)
+{
+	float R = 6372.795477598;
+	float angDistance = geoDist / R;
+	return 2 * R * sin(angDistance/2.0);
+}
+
 void ComputeRelativeAngles(float issLat, float issLon, float issAlt,
 							float Lat, float Lon, float Alt, 
 							float *bearing, float *elevAngle) {
@@ -224,7 +233,12 @@ void ComputeRelativeAngles(float issLat, float issLon, float issAlt,
 	float varPhi = log(tan(issLat/2. + (float)M_PI/4.) / tan(Lat/2. + (float)M_PI/4.));
 	float varLon = abs(Lon - issLon);
 	float geoDist = geodesicDistance(issLat, issLon, Lat, Lon);
+	float chordLen= chordLength(geoDist);
+
 	printf("Distance in flat projection: %f  (km)\n", geoDist);
+	printf("Distance in flat chord lenght: %f  (km)\n", chordLen);
+
+
 	*bearing = atan2(varLon, varPhi);
-	*elevAngle = 0.0;
+	*elevAngle = atan(issAlt / chordLen);
 }
