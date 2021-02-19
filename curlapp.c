@@ -4,7 +4,7 @@
 #include <string.h>
 #include <json-c/json.h>
 #include <time.h>
-#include <string.h>
+#include <math.h>
 
 /* lets get all the data into a memory block */
 struct memory {
@@ -12,25 +12,41 @@ struct memory {
 	size_t size;
 };
 
-void json_parser_iss(const char *buffer);
+void json_parser_iss(const char *buffer, float *issLon, float *issLat, float *issAlt);
 // TODO: void json_parser_location(const char *buffer);
 
+const char* getApiFile(char *jsonKey);
 static size_t writecallback(char *contents, size_t size, size_t nmemb, void *userp);
 struct memory curl_request_iss(void);
 struct memory curl_request_location(void);
-const char* getApiFile(char *jsonKey);
+
+void ComputeRelativeAngles(float issLat, float issLon, float issAlt, // Iss coordinates
+							float Lat, float Long, float Alt,  // Your position
+							float *horzAngle, float *elevAngle); // pointers to angles
+float degreesToRadians(float angleDeg);
+float radiansToDegrees(float angleRad);
+float geodesicDistance(float LatA, float LonA, float LatB, float LonB);
 
 int main(void) {
 	time_t begin = time(NULL);
+	float issLon, issLat, issAlt;
+	float bearing, elevAngle;
+
+	// GPS coordinates of Copenhaguen, hardcoded
+	float Lat = 55.6760968;
+	float Lon = 12.5683371;
+	float Alt = 0.0;
 
 	struct memory chunk = curl_request_iss();
-	json_parser_iss(chunk.memory);
+	json_parser_iss(chunk.memory, &issLon, &issLat, &issAlt);
 
-	struct memory LocChunk = curl_request_location();
+	// struct memory LocChunk = curl_request_location(); //  Has some stack overflow error "*** stack smashing detected ***: terminated"
 	// TODO: void json_parser_location(const char *buffer);
+	printf("Iss position: \n Lat: %f, Long: %f, Alt: %f \n", issLat, issLon, issAlt);
+	ComputeRelativeAngles(issLat, issLon, issAlt, Lat, Lon, Alt, &bearing, &elevAngle);
+	printf("Bearing: %f, Elevation: %f \n", bearing, elevAngle);
 
 	free(chunk.memory);
-	free(LocChunk.memory);
 	printf("--finished %f s--\n", difftime(time(NULL), begin));
 	return 0;
 }
@@ -133,7 +149,7 @@ static size_t writecallback(char *contents, size_t size, size_t nmemb, void *use
 }
 
 // json parser for satellite api query
-void json_parser_iss(const char *buffer) {
+void json_parser_iss(const char *buffer, float *issLon, float *issLat, float *issAlt) {
 	struct json_object *parsed_json;
 	struct json_object *name;
 	struct json_object *id;
@@ -153,14 +169,10 @@ void json_parser_iss(const char *buffer) {
 	json_object_object_get_ex(parsed_json, "velocity", &velocity);
 	json_object_object_get_ex(parsed_json, "timestamp", &timestamp);
 
-	printf("Name: %s\n", json_object_get_string(name));
-	printf("Id: %d\n", json_object_get_int(id));
-	printf("Latitude: %lf\n", json_object_get_double(latitude));
-	printf("Longitude: %lf\n", json_object_get_double(longitude));
-	printf("Altitude: %lf\n", json_object_get_double(altitude));
-	printf("Timestamp: %d\n", json_object_get_int(timestamp));
+	*issLon = json_object_get_double(longitude);
+	*issLat = json_object_get_double(latitude);
+	*issAlt = json_object_get_double(altitude);
 }
-
 
 const char* getApiFile(char *jsonKey) {
 	FILE *fp;
@@ -181,4 +193,38 @@ const char* getApiFile(char *jsonKey) {
 
 	const char* ApiKeyString = json_object_get_string(ApiKey);
 	return  ApiKeyString;
+}
+
+float degreesToRadians(float angleDeg)
+{
+	return angleDeg * (float)M_PI / 180.0;
+}
+
+float radiansToDegrees(float angleRad)
+{
+	return angleRad * 180.0 / (float)M_PI;
+}
+
+
+float geodesicDistance(float LatA, float LonA, float LatB, float LonB)
+{
+	float R = 6372.795477598; // km (radius quadric medium)
+	return R * acos(sin(LatA) * sin(LatB) + cos(LatA) * cos(LatB) * cos(LonA-LonB)); 
+}
+
+void ComputeRelativeAngles(float issLat, float issLon, float issAlt,
+							float Lat, float Lon, float Alt, 
+							float *bearing, float *elevAngle) {
+
+	issLat = degreesToRadians(issLat);
+	issLon = degreesToRadians(issLon);
+	Lat = degreesToRadians(Lat);
+	Lon = degreesToRadians(Lon);
+
+	float varPhi = log(tan(issLat/2. + (float)M_PI/4.) / tan(Lat/2. + (float)M_PI/4.));
+	float varLon = abs(Lon - issLon);
+	float geoDist = geodesicDistance(issLat, issLon, Lat, Lon);
+	printf("Distance in flat projection: %f  (km)\n", geoDist);
+	*bearing = atan2(varLon, varPhi);
+	*elevAngle = 0.0;
 }

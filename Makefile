@@ -1,6 +1,6 @@
 
 CC = `curl-config --cc`
-LIBS = `curl-config --libs` -ljson-c
+LIBS = `curl-config --libs` -ljson-c -lm
 LIBES = 
 
 
