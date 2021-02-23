@@ -27,6 +27,8 @@ float degreesToRadians(float angleDeg);
 float radiansToDegrees(float angleRad);
 float geodesicDistance(float LatA, float LonA, float LatB, float LonB);
 float chordLength(float geoDist);
+float distanceToIss(float chordlen, float height);
+float computeElevation(float chordLen, float height);
 
 int main(void) {
 	time_t begin = time(NULL);
@@ -234,11 +236,32 @@ void ComputeRelativeAngles(float issLat, float issLon, float issAlt,
 	float varLon = abs(Lon - issLon);
 	float geoDist = geodesicDistance(issLat, issLon, Lat, Lon);
 	float chordLen= chordLength(geoDist);
+	float trueDistance = distanceToIss(chordLen, issAlt);
 
-	printf("Distance in flat projection: %f  (km)\n", geoDist);
-	printf("Distance in flat chord lenght: %f  (km)\n", chordLen);
+	printf("Distance (flat projection): %f  (km)\n", geoDist);
+	printf("Distance (chord lenght): %f  (km)\n", chordLen);
+	printf("Total Distance: %f  (km)\n", trueDistance);
 
 
 	*bearing = atan2(varLon, varPhi);
-	*elevAngle = atan(issAlt / chordLen);
+	*elevAngle = computeElevation(chordLen, issAlt);
+}
+
+float distanceToIss(float chordLen, float height)
+{
+	float R = 6372.795477598; // km (radius quadric medium)
+	float beta2 = asin(sqrt(1 - 0.25 * pow(chordLen,2) * pow(R,-2)));
+	float beta1 = 0.5 * (M_PI - beta2);
+	float alpha2 = M_PI - beta1;
+	return sqrt(pow(chordLen,2) + pow(height,2) - 2 * chordLen * height * cos(alpha2));
+}
+
+float computeElevation(float chordLen, float height)
+{
+	float R = 6372.795477598; // km (radius quadric medium)
+	float beta2 = asin(sqrt(1 - 0.25 * pow(chordLen,2) * pow(R,-2)));
+	float beta1 = 0.5 * (M_PI - beta2);
+	float alpha2 = M_PI - beta1;
+	float trueDistance =  sqrt(pow(chordLen,2) + pow(height,2) - 2 * chordLen * height * cos(alpha2));
+	return asin(0.5 * (R + height) * sin(beta2) / trueDistance);
 }
