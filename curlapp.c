@@ -309,7 +309,6 @@ void json_parser_getPlacename(const char *buffer, const char** placename)
 
 	json_object_object_get_ex(parsed_json, "results", &results);
 	n_results = json_object_array_length(results);
-	printf("Found %lu matching results \n", n_results);
 
 	result = json_object_array_get_idx(results, 0);
 	json_object_object_get_ex(result, "formatted", &formatted);
@@ -319,7 +318,6 @@ void json_parser_getPlacename(const char *buffer, const char** placename)
 	//printf("Status response: %d %s \n", StatusCodeResponse, StatusMessageResponse);
 
 	*placename = json_object_get_string(formatted);
-	printf("%s\n", placename);
 }
 
 const char* getApiFile(char *jsonKey)
