@@ -19,10 +19,12 @@ static size_t writecallback(char *contents, size_t size, size_t nmemb, void *use
 // curl functions http get requests
 struct memory curl_request_iss(void);
 struct memory curl_request_location(const char *placename);
+struct memory curl_request_location_from_coords(float lat2, float lon2);
 
 // json parsers for http get request responses
 void json_parser_iss(const char *buffer, float *issLon, float *issLat, float *issAlt);
 void json_parser_getCoordinates(const char *buffer, float *meanLat, float *meanLon, const char* placename);
+void json_parser_getPlacename(const char *buffer, const char** placename);
 
 // trigonometry and other math functions
 float degreesToRadians(float angleDeg);
@@ -38,10 +40,25 @@ void ComputeRelativeAngles(float issLat, float issLon, float issAlt, // Iss coor
 int main(int argc, char *argv[])
 {
 	time_t begin = time(NULL);
+	const char *placename;
+	switch (argc)
+	{
+		case 1:
+			placename = "Copenhaguen";
+			printf("Using default location (%s)\n", placename);
+			break;
+		case 2:
+			placename = argv[1];
+			printf("Setting location to %s\n", placename);
+			break;
+		default:
+			printf("Error: Too many extra arguements. \n");
+			exit(1);
+	}
+
 	float issLon, issLat, issAlt;
 	float bearing, elevAngle;
 	float latitude, longitude, Alt = 0.0;
-	const char *placename = "Copenhaguen";
 
 	// Api request for location coords based on location name
 	struct memory LocChunk = curl_request_location(placename);
@@ -51,7 +68,12 @@ int main(int argc, char *argv[])
 	// api request for ISS position (Lat, Lon, Alt)
 	struct memory chunk = curl_request_iss();
 	json_parser_iss(chunk.memory, &issLon, &issLat, &issAlt);
-	printf("Space Station position: \nLat: %f, Long: %f, Alt: %f \n\n", issLat, issLon, issAlt);
+	printf("Space Station position: \nLat: %f, Long: %f, Alt: %f \n", issLat, issLon, issAlt);
+
+	const char *placenameIss;
+	struct memory CoordChunk = curl_request_location_from_coords(issLat, issLon);
+	json_parser_getPlacename(CoordChunk.memory, &placenameIss);
+	printf("%s\n\n", placenameIss);
 
 	// do the math for the angles (bearing, elevation)
 	ComputeRelativeAngles(issLat, issLon, issAlt, latitude, longitude, Alt, &bearing, &elevAngle);
@@ -59,6 +81,7 @@ int main(int argc, char *argv[])
 
 	free(chunk.memory);
 	free(LocChunk.memory);
+	free(CoordChunk.memory);
 	printf("--finished %f s--\n", difftime(time(NULL), begin));
 	return 0;
 }
@@ -82,16 +105,12 @@ struct memory curl_request_iss(void)
 		res = curl_easy_perform(curl);
 		if (res != CURLE_OK) {
 			fprintf(stderr, "curl_easy_perform() %s\n", curl_easy_strerror(res));
+			exit(1);
 		}
 
 		else {
 			char *domain = NULL;
-			// printf("We got %d bytes to our callback in memory %p\n", (int)chunk.size, chunk.memory);
 			domain = strstr(chunk.memory, "Domain");
-
-			if (domain) {
-				// printf("Found 'domain' at index %d\n", (domain - chunk.memory));
-			}
 		}
 		curl_easy_cleanup(curl);
 	}
@@ -124,20 +143,57 @@ struct memory curl_request_location(const char *placename)
 		res = curl_easy_perform(curl_handle);
 		if (res != CURLE_OK) {
 			fprintf(stderr, "curl easy perform() %s\n", curl_easy_strerror(res));
+			exit(1);
 		}
 
 		else {
 			char *domain = NULL;
 			domain = strstr(LocChunk.memory, "Domain");
 
-			if (domain) {
-				// printf("Found 'domain' at index %d\n", (domain - chunk.memory));
-			}
 		}
 		curl_easy_cleanup(curl_handle);
 	}
 	curl_global_cleanup();
 	return LocChunk;
+}
+
+struct memory curl_request_location_from_coords(float lat2, float lon2)
+{
+	const char* ApiKey = getApiFile("API_KEY"); // load .env api key
+
+	CURL *curl_handle;
+	CURLcode res;
+
+	struct memory CoordChunk;
+	CoordChunk.memory = NULL;
+	CoordChunk.size = 0;
+
+	curl_global_init(CURL_GLOBAL_ALL);
+	curl_handle = curl_easy_init();
+
+	if (curl_handle) {
+		char urlRequestLoc[400];
+		sprintf(urlRequestLoc, "https://api.opencagedata.com/geocode/v1/json?q=%f,%f&key=%s", lat2, lon2, ApiKey);
+		// printf("%s\n", urlRequestLoc);
+		curl_easy_setopt(curl_handle, CURLOPT_URL, urlRequestLoc);
+		curl_easy_setopt(curl_handle, CURLOPT_WRITEFUNCTION, writecallback);
+		curl_easy_setopt(curl_handle, CURLOPT_WRITEDATA, &CoordChunk);
+
+		res = curl_easy_perform(curl_handle);
+		if (res != CURLE_OK) {
+			fprintf(stderr, "curl easy perform() %s\n", curl_easy_strerror(res));
+			exit(1);
+		}
+
+		else {
+			char *domain = NULL;
+			domain = strstr(CoordChunk.memory, "Domain");
+
+		}
+		curl_easy_cleanup(curl_handle);
+	}
+	curl_global_cleanup();
+	return CoordChunk;
 }
 
 static size_t writecallback(char *contents, size_t size, size_t nmemb, void *userp)
@@ -181,6 +237,7 @@ void json_parser_iss(const char *buffer, float *issLon, float *issLat, float *is
 	*issLat = json_object_get_double(latitude);
 	*issAlt = json_object_get_double(altitude);
 }
+
 
 void json_parser_getCoordinates(const char *buffer, float *meanLat, float *meanLon, const char* placename)
 {
@@ -230,6 +287,39 @@ void json_parser_getCoordinates(const char *buffer, float *meanLat, float *meanL
 	int StatusCodeResponse = json_object_get_int(status_code);
 	const char *StatusMessageResponse = json_object_get_string(status_message);
 	printf("Status response: %d %s \n", StatusCodeResponse, StatusMessageResponse);
+}
+
+void json_parser_getPlacename(const char *buffer, const char** placename)
+{
+	size_t n_results;
+
+	struct json_object *parsed_json;
+	struct json_object *status;
+	struct json_object *status_code;
+	struct json_object *status_message;
+	struct json_object *results;
+	struct json_object *result;
+	struct json_object *formatted;
+
+	parsed_json = json_tokener_parse(buffer);
+
+	json_object_object_get_ex(parsed_json, "status", &status);
+	json_object_object_get_ex(status, "code", &status_code);
+	json_object_object_get_ex(status, "message", &status_message);
+
+	json_object_object_get_ex(parsed_json, "results", &results);
+	n_results = json_object_array_length(results);
+	printf("Found %lu matching results \n", n_results);
+
+	result = json_object_array_get_idx(results, 0);
+	json_object_object_get_ex(result, "formatted", &formatted);
+
+	int StatusCodeResponse = json_object_get_int(status_code);
+	const char *StatusMessageResponse = json_object_get_string(status_message);
+	//printf("Status response: %d %s \n", StatusCodeResponse, StatusMessageResponse);
+
+	*placename = json_object_get_string(formatted);
+	printf("%s\n", placename);
 }
 
 const char* getApiFile(char *jsonKey)
