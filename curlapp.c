@@ -1,61 +1,70 @@
 #include <curl/curl.h>
 #include <stdio.h>
 #include <stdlib.h>
-#include <string.h>
 #include <json-c/json.h>
 #include <time.h>
+#include <string.h>
 #include <math.h>
 
-/* lets get all the data into a memory block */
+// memory block to store reqests response
 struct memory {
 	char *memory;
 	size_t size;
 };
 
-void json_parser_iss(const char *buffer, float *issLon, float *issLat, float *issAlt);
-// TODO: void json_parser_location(const char *buffer);
-
+// functions for request writebacks
 const char* getApiFile(char *jsonKey);
 static size_t writecallback(char *contents, size_t size, size_t nmemb, void *userp);
-struct memory curl_request_iss(void);
-struct memory curl_request_location(void);
 
-void ComputeRelativeAngles(float issLat, float issLon, float issAlt, // Iss coordinates
-							float Lat, float Long, float Alt,  // Your position
-							float *horzAngle, float *elevAngle); // pointers to angles
+// curl functions http get requests
+struct memory curl_request_iss(void);
+struct memory curl_request_location(const char *placename);
+
+// json parsers for http get request responses
+void json_parser_iss(const char *buffer, float *issLon, float *issLat, float *issAlt);
+void json_parser_getCoordinates(const char *buffer, float *meanLat, float *meanLon, const char* placename);
+
+// trigonometry and other math functions
 float degreesToRadians(float angleDeg);
 float radiansToDegrees(float angleRad);
 float geodesicDistance(float LatA, float LonA, float LatB, float LonB);
 float chordLength(float geoDist);
 float distanceToIss(float chordlen, float height);
 float computeElevation(float chordLen, float height);
+void ComputeRelativeAngles(float issLat, float issLon, float issAlt, // Iss coordinates
+							float Lat, float Long, float Alt,  // Your position
+							float *horzAngle, float *elevAngle); // pointers to angles
 
-int main(void) {
+int main(int argc, char *argv[])
+{
 	time_t begin = time(NULL);
 	float issLon, issLat, issAlt;
 	float bearing, elevAngle;
+	float latitude, longitude, Alt = 0.0;
+	const char *placename = "Copenhaguen";
 
-	// GPS coordinates of Copenhaguen, hardcoded
-	float Lat = 55.6760968;
-	float Lon = 12.5683371;
-	float Alt = 0.0;
+	// Api request for location coords based on location name
+	struct memory LocChunk = curl_request_location(placename);
+	json_parser_getCoordinates(LocChunk.memory, &latitude, &longitude, placename);
+	printf("Latitude: %f , Longitude: %f \n\n", latitude, longitude);
 
+	// api request for ISS position (Lat, Lon, Alt)
 	struct memory chunk = curl_request_iss();
 	json_parser_iss(chunk.memory, &issLon, &issLat, &issAlt);
+	printf("Space Station position: \nLat: %f, Long: %f, Alt: %f \n\n", issLat, issLon, issAlt);
 
-	// struct memory LocChunk = curl_request_location(); //  Has some stack overflow error "*** stack smashing detected ***: terminated"
-	// TODO: void json_parser_location(const char *buffer);
-	printf("Iss position: \n Lat: %f, Long: %f, Alt: %f \n", issLat, issLon, issAlt);
-	ComputeRelativeAngles(issLat, issLon, issAlt, Lat, Lon, Alt, &bearing, &elevAngle);
-
-	printf("Bearing: %f, Elevation: %f \n", bearing, elevAngle);
+	// do the math for the angles (bearing, elevation)
+	ComputeRelativeAngles(issLat, issLon, issAlt, latitude, longitude, Alt, &bearing, &elevAngle);
+	printf("Bearing: %f, Elevation: %f \n\n", bearing, elevAngle);
 
 	free(chunk.memory);
+	free(LocChunk.memory);
 	printf("--finished %f s--\n", difftime(time(NULL), begin));
 	return 0;
 }
 
-struct memory curl_request_iss(void) {
+struct memory curl_request_iss(void)
+{
 	CURL *curl;
 	CURLcode res;
 	struct memory chunk;
@@ -72,7 +81,7 @@ struct memory curl_request_iss(void) {
 
 		res = curl_easy_perform(curl);
 		if (res != CURLE_OK) {
-			fprintf(stderr, "curl_easy_perform() returned %s\n", curl_easy_strerror(res));
+			fprintf(stderr, "curl_easy_perform() %s\n", curl_easy_strerror(res));
 		}
 
 		else {
@@ -91,10 +100,9 @@ struct memory curl_request_iss(void) {
 	return chunk;
 }
 
-struct memory curl_request_location(void) {
-
-	// load .env api key
-	const char* ApiKey = getApiFile("API_KEY");
+struct memory curl_request_location(const char *placename)
+{
+	const char* ApiKey = getApiFile("API_KEY"); // load .env api key
 
 	CURL *curl_handle;
 	CURLcode res;
@@ -107,17 +115,15 @@ struct memory curl_request_location(void) {
 	curl_handle = curl_easy_init();
 
 	if (curl_handle) {
-		char *placename = "Copenhaguen"; // temp hardcoded
-		char urlRequestLoc[50];
+		char urlRequestLoc[300];
 		sprintf(urlRequestLoc, "https://api.opencagedata.com/geocode/v1/json?q=%s&key=%s", placename, ApiKey);
-
 		curl_easy_setopt(curl_handle, CURLOPT_URL, urlRequestLoc);
 		curl_easy_setopt(curl_handle, CURLOPT_WRITEFUNCTION, writecallback);
 		curl_easy_setopt(curl_handle, CURLOPT_WRITEDATA, &LocChunk);
 
 		res = curl_easy_perform(curl_handle);
 		if (res != CURLE_OK) {
-			fprintf(stderr, "curl easy perform() returned %s\n", curl_easy_strerror(res));
+			fprintf(stderr, "curl easy perform() %s\n", curl_easy_strerror(res));
 		}
 
 		else {
@@ -131,13 +137,11 @@ struct memory curl_request_location(void) {
 		curl_easy_cleanup(curl_handle);
 	}
 	curl_global_cleanup();
-	printf("%s \n", LocChunk.memory);
 	return LocChunk;
 }
 
-/* if received data doesnt match expected size then terminates program
-this function is used to jump over that condition*/
-static size_t writecallback(char *contents, size_t size, size_t nmemb, void *userp) {
+static size_t writecallback(char *contents, size_t size, size_t nmemb, void *userp)
+{
 	size_t realsize = size * nmemb;
 	struct memory *mem = (struct memory *)userp;
 
@@ -152,8 +156,8 @@ static size_t writecallback(char *contents, size_t size, size_t nmemb, void *use
 	return realsize;
 }
 
-// json parser for satellite api query
-void json_parser_iss(const char *buffer, float *issLon, float *issLat, float *issAlt) {
+void json_parser_iss(const char *buffer, float *issLon, float *issLat, float *issAlt)
+{
 	struct json_object *parsed_json;
 	struct json_object *name;
 	struct json_object *id;
@@ -178,7 +182,58 @@ void json_parser_iss(const char *buffer, float *issLon, float *issLat, float *is
 	*issAlt = json_object_get_double(altitude);
 }
 
-const char* getApiFile(char *jsonKey) {
+void json_parser_getCoordinates(const char *buffer, float *meanLat, float *meanLon, const char* placename)
+{
+	size_t n_results;
+
+	struct json_object *parsed_json;
+	struct json_object *status;
+	struct json_object *status_code;
+	struct json_object *status_message;
+	struct json_object *results;
+	struct json_object *result;
+	struct json_object *bounds;
+	struct json_object *northeast;
+	struct json_object *southwest;
+	struct json_object *latNortheast;
+	struct json_object *lonNortheast;
+	struct json_object *latSouthwest;
+	struct json_object *lonSouthwest;
+
+	parsed_json = json_tokener_parse(buffer);
+
+	json_object_object_get_ex(parsed_json, "status", &status);
+	json_object_object_get_ex(status, "code", &status_code);
+	json_object_object_get_ex(status, "message", &status_message);
+
+	json_object_object_get_ex(parsed_json, "results", &results);
+	n_results = json_object_array_length(results);
+	printf("Found %lu matching results for (%s).\n", n_results, placename);
+
+	result = json_object_array_get_idx(results, 0);
+	json_object_object_get_ex(result, "bounds", &bounds);
+	json_object_object_get_ex(bounds, "northeast", &northeast);
+	json_object_object_get_ex(bounds, "southwest", &southwest);
+	json_object_object_get_ex(northeast, "lat", &latNortheast);
+	json_object_object_get_ex(northeast, "lng", &lonNortheast);
+	json_object_object_get_ex(southwest, "lat", &latSouthwest);
+	json_object_object_get_ex(southwest, "lng", &lonSouthwest);
+
+	float latitudeNortheast = json_object_get_double(latNortheast);
+	float longitudeNortheast = json_object_get_double(lonNortheast);
+	float latitudeSouthwest = json_object_get_double(latSouthwest);
+	float longitudeSouthwest = json_object_get_double(lonSouthwest);
+
+	*meanLat = 0.5 * (latitudeNortheast + latitudeSouthwest);
+	*meanLon = 0.5 * (longitudeNortheast + longitudeSouthwest);
+
+	int StatusCodeResponse = json_object_get_int(status_code);
+	const char *StatusMessageResponse = json_object_get_string(status_message);
+	printf("Status response: %d %s \n", StatusCodeResponse, StatusMessageResponse);
+}
+
+const char* getApiFile(char *jsonKey)
+{
 	FILE *fp;
 	char buffer[1024];
 	fp = fopen("env.json", "r");
@@ -209,7 +264,6 @@ float radiansToDegrees(float angleRad)
 	return angleRad * 180.0 / (float)M_PI;
 }
 
-
 float geodesicDistance(float LatA, float LonA, float LatB, float LonB)
 {
 	float R = 6372.795477598; // km (radius quadric medium)
@@ -223,10 +277,8 @@ float chordLength(float geoDist)
 	return 2 * R * sin(angDistance/2.0);
 }
 
-void ComputeRelativeAngles(float issLat, float issLon, float issAlt,
-							float Lat, float Lon, float Alt, 
-							float *bearing, float *elevAngle) {
-
+void ComputeRelativeAngles(float issLat, float issLon, float issAlt, float Lat, float Lon, float Alt, float *bearing, float *elevAngle)
+{
 	issLat = degreesToRadians(issLat);
 	issLon = degreesToRadians(issLon);
 	Lat = degreesToRadians(Lat);
