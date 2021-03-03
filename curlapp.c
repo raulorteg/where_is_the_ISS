@@ -6,6 +6,13 @@
 #include <string.h>
 #include <math.h>
 
+// sleep() function
+#ifdef _WIN32
+#include <Windows.h>
+#else
+#include <unistd.h>
+#endif
+
 // memory block to store reqests response
 struct memory {
 	char *memory;
@@ -41,6 +48,8 @@ int main(int argc, char *argv[])
 {
 	time_t begin = time(NULL);
 	const char *placename;
+	int num_cycles = 1;
+
 	switch (argc)
 	{
 		case 1:
@@ -51,6 +60,12 @@ int main(int argc, char *argv[])
 			placename = argv[1];
 			printf("Setting location to %s\n", placename);
 			break;
+		case 3:
+			placename = argv[1];
+			printf("Setting location to %s\n", placename);
+			num_cycles = atoi(argv[2]);
+			break;
+
 		default:
 			printf("Error: Too many extra arguements. \n");
 			exit(1);
@@ -65,23 +80,40 @@ int main(int argc, char *argv[])
 	json_parser_getCoordinates(LocChunk.memory, &latitude, &longitude, placename);
 	printf("Latitude: %f , Longitude: %f \n\n", latitude, longitude);
 
-	// api request for ISS position (Lat, Lon, Alt)
-	struct memory chunk = curl_request_iss();
-	json_parser_iss(chunk.memory, &issLon, &issLat, &issAlt);
-	printf("Space Station position: \nLat: %f, Long: %f, Alt: %f \n", issLat, issLon, issAlt);
+	int cycle = 1;
+	while (cycle <= num_cycles)
+	{
+		// api request for ISS position (Lat, Lon, Alt)
+		struct memory chunk = curl_request_iss();
+		json_parser_iss(chunk.memory, &issLon, &issLat, &issAlt);
+		printf("Space Station position: \nLat: %f, Long: %f, Alt: %f \n", issLat, issLon, issAlt);
 
-	const char *placenameIss;
-	struct memory CoordChunk = curl_request_location_from_coords(issLat, issLon);
-	json_parser_getPlacename(CoordChunk.memory, &placenameIss);
-	printf("%s\n\n", placenameIss);
+		const char *placenameIss;
+		struct memory CoordChunk = curl_request_location_from_coords(issLat, issLon);
+		json_parser_getPlacename(CoordChunk.memory, &placenameIss);
+		printf("%s\n\n", placenameIss);
 
-	// do the math for the angles (bearing, elevation)
-	ComputeRelativeAngles(issLat, issLon, issAlt, latitude, longitude, Alt, &bearing, &elevAngle);
-	printf("Bearing: %f, Elevation: %f \n\n", bearing, elevAngle);
+		// do the math for the angles (bearing, elevation)
+		ComputeRelativeAngles(issLat, issLon, issAlt, latitude, longitude, Alt, &bearing, &elevAngle);
+		float final_bearing = round(radiansToDegrees(bearing));
+		float final_elevation = round(radiansToDegrees(elevAngle));
+		printf("Bearing: %f, Elevation: %f \n\n", final_bearing, final_elevation);
 
+		// update cycle and sleep for a minute
+		cycle++;
+
+		// only wait if there will be a new cycle
+		if (cycle <= num_cycles)
+			printf("------------------------------------ \n\n");
+			sleep(60);
+	}
+
+	/*
 	free(chunk.memory);
 	free(LocChunk.memory);
 	free(CoordChunk.memory);
+	*/
+
 	printf("--finished %f s--\n", difftime(time(NULL), begin));
 	return 0;
 }
