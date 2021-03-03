@@ -11,11 +11,14 @@ Project requires `ljson-c` and `curl`.
 Makefile takes care of dependencies and generates executable `curlapp`.
 - Clean previous outfiles `make clean`
 - Build executable `make`
-- Run executable `./curlapp UserCity` (if argument is ommited uses default, Copenhaguen)   
+- Run executable `./curlapp UserCity numCycles` (if argument is ommited uses default, Copenhaguen and 1 cycle)   
 
-The executable returns User coordinates, Iss current position in coordinates and formatted text, returns distance in flat projection, chord length, and true distance with bearing and elevation angle.
+The executable returns User coordinates, Iss current position in coordinates and formatted text, returns distance in flat projection, chord length, and true distance with bearing and elevation angle. As below:
+
+
+<img src = "files/example.png" height="300"/>
 
 ## Structure
 * curlapp.c: gets user coords, gets Iss coords, computes distance between, bearing and elevation angles. Main program.
-* /files: media for README.md
+* servo.c: Script for controlling the servo motors.
 
