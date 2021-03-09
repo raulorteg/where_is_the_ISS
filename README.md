@@ -2,6 +2,9 @@
 <img src = "files/satellite_img.png" height="150"/>
 
 ## About
+(This is an unfinished project, still under contruction :construction:)
+
+
 Where is the ISS at? C project with Arduino/Raspberry Pi that gets the instant position (latitude, longitude, altitude) of the International Space Station, and points towards its location in the sky depending on the user location (latitude, longitude, altitude=0).
 
 ## Requirements
@@ -20,5 +23,5 @@ The executable returns User coordinates, Iss current position in coordinates and
 
 ## Structure
 * curlapp.c: gets user coords, gets Iss coords, computes distance between, bearing and elevation angles. Main program.
-* servo.c: Script for controlling the servo motors.
+* servo.c: Script for controlling the servo motors (to be loaded in arduino, yet untested).
 
